@@ -33,7 +33,6 @@ def start(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add('🔍 Начать поиск', '👥 Групповой чат')
     markup.add('👤 Имя', '❌ Отмена')
-    markup.add('⭐ Пожертвовать')
     bot.send_message(message.chat.id, "👋 Привет! Выбери действие:", reply_markup=markup)
 
 @bot.message_handler(func=lambda message: message.text == '👤 Имя')
@@ -118,32 +117,6 @@ def chat(message):
             if member != user_id:
                 if message.content_type == 'text': bot.send_message(member, f"💬 {name}: {message.text}")
                 else: bot.send_message(member, f"👤 {name}:"); bot.copy_message(member, user_id, message.message_id)
-
-# 1. Ловим нажатие на кнопку меню
-@bot.message_handler(func=lambda message: message.text == '⭐ Пожертвовать')
-def donate_start(message):
-    msg = bot.send_message(message.chat.id, "✍️ Введите количество звёзд (⭐), которое вы хотите отправить:")
-    bot.register_next_step_handler(msg, process_donate_amount)
-
-# 2. Получаем число и выводим сообщение с кнопкой-ссылкой
-def process_donate_amount(message):
-    amount = message.text.strip()
-    
-    # Проверяем, что ввели именно число
-    if not amount.isdigit():
-        msg = bot.send_message(message.chat.id, "⚠️ Пожалуйста, введите корректное число звёзд:")
-        bot.register_next_step_handler(msg, process_donate_amount)
-        return
-
-    # Создаем инлайн-клавиатуру
-    markup = InlineKeyboardMarkup()
-    
-    # Кнопка URL — она гарантированно перекинет пользователя на профиль @vibenix
-    url_button = InlineKeyboardButton(text="Отправить", url="https://t.me/vibenix")
-    markup.add(url_button)
-    
-    # Отправляем сообщение, как ты просил
-    bot.send_message(message.chat.id, f"Запрос на {amount}⭐", reply_markup=markup)
 
 if __name__ == '__main__':
     print("Бот запущен...")
