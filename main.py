@@ -8,6 +8,7 @@ import time
 
 API_TOKEN = os.environ.get('API_TOKEN')
 bot = telebot.TeleBot(API_TOKEN)
+PORT = int(os.environ.get('PORT', 8080))
 
 # Данные
 waiting_users = []
