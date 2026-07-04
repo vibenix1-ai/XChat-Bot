@@ -119,68 +119,31 @@ def chat(message):
                 if message.content_type == 'text': bot.send_message(member, f"💬 {name}: {message.text}")
                 else: bot.send_message(member, f"👤 {name}:"); bot.copy_message(member, user_id, message.message_id)
 
-# Обработка нажатия на кнопку "⭐ Пожертвовать"
+# 1. Ловим нажатие на кнопку меню
 @bot.message_handler(func=lambda message: message.text == '⭐ Пожертвовать')
 def donate_start(message):
     msg = bot.send_message(message.chat.id, "✍️ Введите количество звёзд (⭐), которое вы хотите отправить:")
     bot.register_next_step_handler(msg, process_donate_amount)
 
-# Получение количества звезд и создание инвойса
+# 2. Получаем число и выводим сообщение с кнопкой-ссылкой
 def process_donate_amount(message):
-    amount_str = message.text.strip()
+    amount = message.text.strip()
     
-    if not amount_str.isdigit() or int(amount_str) <= 0:
+    # Проверяем, что ввели именно число
+    if not amount.isdigit():
         msg = bot.send_message(message.chat.id, "⚠️ Пожалуйста, введите корректное число звёзд:")
         bot.register_next_step_handler(msg, process_donate_amount)
         return
 
-    amount = int(amount_str)
-    user_id = message.chat.id
-    name = get_display_name(user_id)
-    username = f"@{message.from_user.username}" if message.from_user.username else "Нет юзернейма"
-
-    # 1. Отправляем реальную платежную кнопку (инвойс) в Telegram Stars
-    try:
-        bot.send_invoice(
-            chat_id=user_id,
-            title="Добровольное пожертвование",
-            description=f"Запрос на {amount}⭐",
-            invoice_payload=f"donate_{user_id}_{amount}",
-            provider_token="", # Для Telegram Stars (XTR) токен провайдера должен быть пустой строкой
-            currency="XTR",    # Код валюты для Telegram Stars
-            prices=[types.LabeledPrice(label="Telegram Stars", amount=amount)]
-        )
-    except Exception as e:
-        bot.send_message(user_id, f"⚠️ Не удалось создать платеж. Ошибка: {e}")
-
-    # 2. Пересылаем уведомление о запросе пользователю @vibenix
-    admin_message = (
-        f"🔔 Новый запрос на отправку звёзд!\n"
-        f"Пользователь: {name} (ID: {user_id}, {username})\n"
-        f"Количество: {amount} ⭐"
-    )
-    try:
-        bot.send_message("@vibenix", admin_message)
-    except Exception:
-        # Если бот еще не общался с @vibenix, сообщение не уйдет, но платеж у юзера все равно отобразится
-        pass
-
-# Хэндлер для подтверждения того, что платеж вообще возможен (Pre-checkout)
-@bot.pre_checkout_query_handler(func=lambda query: True)
-def checkout(pre_checkout_query):
-    bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
-
-# Хэндлер успешной оплаты (вызывается, когда юзер реально оплатил звезды)
-@bot.message_handler(content_types=['successful_payment'])
-def got_payment(message):
-    amount = message.successful_payment.total_amount
-    bot.send_message(message.chat.id, f"🎉 Спасибо! Вы успешно отправили {amount} ⭐")
+    # Создаем инлайн-клавиатуру
+    markup = InlineKeyboardMarkup()
     
-    # Дополнительно уведомляем @vibenix об успешной оплате
-    try:
-        bot.send_message("@vibenix", f"✅ Пользователь {get_display_name(message.chat.id)} успешно оплатил {amount} ⭐!")
-    except Exception:
-        pass
+    # Кнопка URL — она гарантированно перекинет пользователя на профиль @vibenix
+    url_button = InlineKeyboardButton(text="Отправить", url="https://t.me/vibenix")
+    markup.add(url_button)
+    
+    # Отправляем сообщение, как ты просил
+    bot.send_message(message.chat.id, f"Запрос на {amount}⭐", reply_markup=markup)
 
 if __name__ == '__main__':
     print("Бот запущен...")
