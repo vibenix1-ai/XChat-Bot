@@ -90,7 +90,7 @@ def show_my_name(message):
     name = get_display_name(user_id)
     
     if name == "Аноним":
-        bot.send_message(user_id, "ℹ️ Стандартное имя Аноним, пожалуй вам стоит поменять имя")
+        bot.send_message(user_id, "ℹ️ Стандартное имя Аноним, пожалуй вам стоит сменить имя")
     else:
         bot.send_message(user_id, f"ℹ️ Вы {name}")
 
