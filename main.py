@@ -183,7 +183,7 @@ def start(message):
         except ValueError:
             pass
 
-    bot.send_message(user_id, "👋 Привет! Выбери действие на клавиатуре ниже:", reply_markup=get_main_keyboard())
+    bot.send_message(user_id, "👋 Привет! Выбери действие:", reply_markup=get_main_keyboard())
     show_profile_card(user_id, user_id)
 
 @bot.message_handler(commands=['profile'])
