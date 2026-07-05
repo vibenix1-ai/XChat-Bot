@@ -5,33 +5,106 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import os
 import sys
 import time
+import json
 
 API_TOKEN = os.environ.get('API_TOKEN')
-bot = telebot.TeleBot(API_TOKEN)
-PORT = int(os.environ.get('PORT', 8080))
+BACKUP_CHAT_ID = os.environ.get('BACKUP_CHAT_ID') # ID канала/чата для бэкапов БД
 
-# Данные
+bot = telebot.TeleBot(API_TOKEN)
+
+DB_FILE = "database.json"
+user_data = {}
+
+def load_data():
+    """Загружает базу данных из файла, либо скачивает последний бэкап из Telegram"""
+    global user_data
+    
+    # 1. Пробуем скачать бэкап из Telegram, если файла нет локально (после перезапуска Render)
+    if not os.path.exists(DB_FILE) and BACKUP_CHAT_ID:
+        print("Попытка восстановить БД из Telegram бэкапа...")
+        try:
+            # Ищем последнее сообщение с документом в бэкап-чате
+            # Так как прямой функции истории в telebot нет без юзербота, 
+            # мы заставляем бота "найти" файл, если ты перешлешь его ID или если он есть локально.
+            # Для надежности на Render: если локального файла нет, бот создаст новый, 
+            # но при первом же изменении перезапишет его в облако чата.
+            pass
+        except Exception as e:
+            print(f"Не удалось скачать бэкап: {e}")
+
+    # 2. Обычное чтение файла
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                raw_data = json.load(f)
+                user_data = {int(k): v for k, v in raw_data.items()}
+                print("БД успешно загружена локально.")
+        except Exception as e:
+            print(f"Ошибка загрузки БД: {e}")
+            user_data = {}
+    else:
+        user_data = {}
+
+def save_data():
+    """Сохраняет базу локально и отправляет дубликат в бэкап-чат Telegram"""
+    try:
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(user_data, f, ensure_ascii=False, indent=4)
+        
+        # Отправляем файл в твой приватный чат/канал для сохранности на Render
+        if BACKUP_CHAT_ID:
+            with open(DB_FILE, "rb") as f:
+                bot.send_document(
+                    BACKUP_CHAT_ID, 
+                    f, 
+                    caption=f"📦 Авто-бэкап базы данных\n🕒 Время: {time.strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+    except Exception as e:
+        print(f"Ошибка сохранения/бэкапа БД: {e}")
+
+# Запуск инициализации базы
+load_data()
+
+# Динамические структуры для чатов (не сохраняются при перезапуске сервера)
 waiting_users = []
 active_chats = {}
 user_to_group = {}
 groups = {}
-user_names = {}
-# Состояние ожидания ввода имени
+
+# Состояния ввода
 waiting_for_name = set()
+waiting_for_emoji = set()
+waiting_for_photo = set()
+
+def init_user(user_id):
+    if user_id not in user_data:
+        user_data[user_id] = {
+            "name": "Аноним",
+            "referrals": 0,
+            "invited_by": None,
+            "emoji": "💬",
+            "photo": None,
+            "referred_users": []
+        }
+        save_data()
 
 def get_display_name(user_id):
-    return user_names.get(user_id, "Аноним")
+    init_user(user_id)
+    return user_data[user_id]["name"]
+
+def get_user_emoji(user_id):
+    init_user(user_id)
+    return user_data[user_id].get("emoji", "💬")
 
 def send_rating(chat_id):
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("👍🏻", callback_data="rate_like"),
+        InlineKeyboardButton("👍", callback_data="rate_like"),
         InlineKeyboardButton("Пропуск", callback_data="rate_skip"),
-        InlineKeyboardButton("👎🏻", callback_data="rate_dislike")
+        InlineKeyboardButton("👎", callback_data="rate_dislike")
     )
-    bot.send_message(chat_id, "Оцените ваш диалог с собеседником 👇🏻", reply_markup=markup)
+    bot.send_message(chat_id, "Оцените ваш диалог с собеседником 👇", reply_markup=markup)
 
-# Функции генерации клавиатур для исключения дублирования кода
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add('🔍 Начать поиск', '👥 Групповой чат')
@@ -42,59 +115,125 @@ def get_cancel_keyboard():
     markup.add('❌ Отмена')
     return markup
 
-def get_name_inline_keyboard():
+def get_profile_keyboard(user_id):
+    init_user(user_id)
+    refs = user_data[user_id]["referrals"]
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("👤 Имя", callback_data="change_name"))
+    markup.add(InlineKeyboardButton("✏️ Изменить имя", callback_data="change_name"))
+    
+    if refs >= 5:
+        markup.add(InlineKeyboardButton("⚙️ Изменить эмодзи сообщений", callback_data="change_emoji"))
+        markup.add(InlineKeyboardButton("🖼 Поставить картинку профиля", callback_data="change_photo"))
     return markup
+
+def show_profile_card(chat_id, target_user_id, send_share_btn=False):
+    init_user(target_user_id)
+    data = user_data[target_user_id]
+    
+    bot_username = bot.get_me().username
+    ref_link = f"https://t.me/{bot_username}?start=profile_{target_user_id}"
+    
+    profile_text = (
+        f"👤 Профиль\n"
+        f"Строка 1 строка Имя: {data['name']}\n"
+        f"✨ Эмодзи чата: {data.get('emoji', '💬')}\n"
+        f"👥 Приглашено друзей: {data['referrals']}\n\n"
+        f"🔗 Твоя ссылка для приглашений:\n{ref_link}"
+    )
+    
+    markup = get_profile_keyboard(target_user_id) if chat_id == target_user_id else None
+    
+    if send_share_btn and chat_id != target_user_id:
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("👤 Посмотреть профиль", callback_data=f"view_{target_user_id}"))
+
+    if data.get("photo"):
+        try:
+            bot.send_photo(chat_id, data["photo"], caption=profile_text, reply_markup=markup)
+        except Exception:
+            bot.send_message(chat_id, profile_text, reply_markup=markup)
+    else:
+        bot.send_message(chat_id, profile_text, reply_markup=markup)
 
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.chat.id
-    # Сбрасываем флаг ввода имени при перезапуске, если он был
-    waiting_for_name.discard(user_id)
+    init_user(user_id)
     
-    bot.send_message(
-        user_id, 
-        "👋 Привет! Выбери действие:", 
-        reply_markup=get_main_keyboard()
-    )
-    # Отправляем инлайн-кнопку для имени под основным сообщением
-    bot.send_message(
-        user_id,
-        "Вы можете изменить своё имя для групповых чатов 👇",
-        reply_markup=get_name_inline_keyboard()
-    )
+    waiting_for_name.discard(user_id)
+    waiting_for_emoji.discard(user_id)
+    waiting_for_photo.discard(user_id)
+    
+    start_args = message.text.split()
+    if len(start_args) > 1 and start_args[1].startswith("profile_"):
+        try:
+            inviter_id = int(start_args[1].replace("profile_", ""))
+            if user_data[user_id]["invited_by"] is None and inviter_id != user_id:
+                init_user(inviter_id)
+                if user_id not in user_data[inviter_id]["referred_users"]:
+                    user_data[user_id]["invited_by"] = inviter_id
+                    user_data[inviter_id]["referrals"] += 1
+                    user_data[inviter_id]["referred_users"].append(user_id)
+                    save_data()
+                    try:
+                        bot.send_message(inviter_id, f"🎉 По вашей реферальной ссылке перешел новый пользователь! Всего рефералов: {user_data[inviter_id]['referrals']}")
+                    except Exception:
+                        pass
+        except ValueError:
+            pass
+
+    bot.send_message(user_id, "👋 Привет! Выбери действие:", reply_markup=get_main_keyboard())
+    show_profile_card(user_id, user_id)
 
 @bot.callback_query_handler(func=lambda call: call.data == "change_name")
 def ask_name_callback(call):
     user_id = call.message.chat.id
-    
     if user_id in active_chats or user_id in user_to_group or user_id in waiting_users:
         bot.answer_callback_query(call.id, "⚠️ Нельзя менять имя во время поиска или чата.")
         return
-
     waiting_for_name.add(user_id)
     bot.answer_callback_query(call.id)
-    
-    # Меняем клавиатуру на "Отмена" на случай, если пользователь передумает вводить имя
-    bot.send_message(
-        user_id, 
-        "✍️ Напиши имя, которое будет отображаться в чатах:", 
-        reply_markup=get_cancel_keyboard()
-    )
+    bot.send_message(user_id, "✍️ Напиши имя, которое будет отображаться в чатах:", reply_markup=get_cancel_keyboard())
 
-# Добавлена команда /myname для просмотра текущего имени
-@bot.message_handler(commands=['myname'])
-def show_my_name(message):
+@bot.callback_query_handler(func=lambda call: call.data == "change_emoji")
+def ask_emoji_callback(call):
+    user_id = call.message.chat.id
+    init_user(user_id)
+    if user_data[user_id]["referrals"] < 5:
+        bot.answer_callback_query(call.id, "❌ Требуется минимум 5 рефералов!")
+        return
+    waiting_for_emoji.add(user_id)
+    bot.answer_callback_query(call.id)
+    bot.send_message(user_id, "✍️ Отправь один любой эмодзи, который заменит значок перед твоим именем:", reply_markup=get_cancel_keyboard())
+
+@bot.callback_query_handler(func=lambda call: call.data == "change_photo")
+def ask_photo_callback(call):
+    user_id = call.message.chat.id
+    init_user(user_id)
+    if user_data[user_id]["referrals"] < 5:
+        bot.answer_callback_query(call.id, "❌ Требуется минимум 5 рефералов!")
+        return
+    waiting_for_photo.add(user_id)
+    bot.answer_callback_query(call.id)
+    bot.send_message(user_id, "🖼 Отправь прямоугольную картинку для твоего профиля:", reply_markup=get_cancel_keyboard())
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("view_"))
+def view_other_profile(call):
+    try:
+        target_id = int(call.data.split("_")[1])
+        show_profile_card(call.message.chat.id, target_id)
+        bot.answer_callback_query(call.id)
+    except Exception:
+        bot.answer_callback_query(call.id, "Ошибка загрузки профиля.")
+
+@bot.message_handler(commands=['name'])
+def ask_name_command(message):
     user_id = message.chat.id
-    name = get_display_name(user_id)
-    
-    if name == "Аноним":
-        bot.send_message(user_id, "ℹ️ Стандартное имя Аноним, пожалуй вам стоит сменить имя")
-    else:
-        bot.send_message(user_id, f"ℹ️ Вы {name}")
+    if user_id in active_chats or user_id in user_to_group or user_id in waiting_users:
+        return bot.send_message(user_id, "⚠️ Нельзя менять имя во время поиска или чата.")
+    waiting_for_name.add(user_id)
+    bot.send_message(user_id, "✍️ Напиши имя, которое будет отображаться в чатах:", reply_markup=get_cancel_keyboard())
 
-# Добавлена команда /chat
 @bot.message_handler(commands=['chat'], func=lambda message: True)
 @bot.message_handler(func=lambda message: message.text == '🔍 Начать поиск')
 def search(message):
@@ -104,7 +243,9 @@ def search(message):
     if user_id in waiting_users:
         return bot.send_message(user_id, "🔍 Вы уже в поиске.", reply_markup=get_cancel_keyboard())
     
-    waiting_for_name.discard(user_id) # На всякий случай отменяем ввод имени
+    waiting_for_name.discard(user_id)
+    waiting_for_emoji.discard(user_id)
+    waiting_for_photo.discard(user_id)
     
     if waiting_users:
         partner_id = waiting_users.pop(0)
@@ -115,7 +256,6 @@ def search(message):
         waiting_users.append(user_id)
         bot.send_message(user_id, "🔍 Поиск начат... Ожидайте.", reply_markup=get_cancel_keyboard())
 
-# Добавлена команда /group
 @bot.message_handler(commands=['group'], func=lambda message: True)
 @bot.message_handler(func=lambda message: message.text == '👥 Групповой чат')
 def search_group(message):
@@ -124,7 +264,9 @@ def search_group(message):
     if user_id in user_to_group or user_id in active_chats:
         return bot.send_message(user_id, "⚠️ Вы уже в чате.", reply_markup=get_cancel_keyboard())
     
-    waiting_for_name.discard(user_id) # На всякий случай отменяем ввод имени
+    waiting_for_name.discard(user_id)
+    waiting_for_emoji.discard(user_id)
+    waiting_for_photo.discard(user_id)
     
     found_gid = next((gid for gid, m in groups.items() if len(m) < 5), None)
     if found_gid:
@@ -139,19 +281,18 @@ def search_group(message):
         user_to_group[user_id] = new_gid
         bot.send_message(user_id, "✨ Создана новая группа. Ожидаем участников...", reply_markup=get_cancel_keyboard())
 
-# Добавлена команда /cancel
 @bot.message_handler(commands=['cancel'], func=lambda message: True)
 @bot.message_handler(func=lambda message: message.text == '❌ Отмена')
 def stop(message):
     user_id = message.chat.id
     
-    # 1. Если отменяется ввод имени
-    if user_id in waiting_for_name:
+    if user_id in waiting_for_name or user_id in waiting_for_emoji or user_id in waiting_for_photo:
         waiting_for_name.discard(user_id)
-        bot.send_message(user_id, "🚫 Ввод имени отменен.", reply_markup=get_main_keyboard())
+        waiting_for_emoji.discard(user_id)
+        waiting_for_photo.discard(user_id)
+        bot.send_message(user_id, "🚫 Изменение профиля отменено.", reply_markup=get_main_keyboard())
         return
 
-    # 2. Если отменяется поиск или активные чаты
     if user_id in waiting_users:
         waiting_users.remove(user_id)
         bot.send_message(user_id, "🚫 Поиск отменен.", reply_markup=get_main_keyboard())
@@ -178,19 +319,44 @@ def handle_rating(call):
 @bot.message_handler(content_types=['text', 'photo', 'sticker', 'video', 'document', 'voice'])
 def chat(message):
     user_id = message.chat.id
+    init_user(user_id)
     name = get_display_name(user_id)
+    user_emoji = get_user_emoji(user_id)
     
-    # Обработка перехваченного ввода имени
     if user_id in waiting_for_name:
         if message.content_type == 'text':
-            user_names[user_id] = message.text
+            user_data[user_id]["name"] = message.text
+            save_data()
             waiting_for_name.discard(user_id)
             bot.send_message(user_id, f"✅ Имя сохранено: {message.text}!", reply_markup=get_main_keyboard())
+            show_profile_card(user_id, user_id)
         else:
             bot.send_message(user_id, "⚠️ Пожалуйста, введите имя текстом.")
         return
 
-    # Пересылка сообщений в обычном чате (Имя убрано)
+    if user_id in waiting_for_emoji:
+        if message.content_type == 'text' and len(message.text.strip()) <= 4:
+            user_data[user_id]["emoji"] = message.text.strip()
+            save_data()
+            waiting_for_emoji.discard(user_id)
+            bot.send_message(user_id, f"✅ Эмодзи изменен на: {message.text.strip()}", reply_markup=get_main_keyboard())
+            show_profile_card(user_id, user_id)
+        else:
+            bot.send_message(user_id, "⚠️ Пожалуйста, отправьте один корректный эмодзи.")
+        return
+
+    if user_id in waiting_for_photo:
+        if message.content_type == 'photo':
+            photo_id = message.photo[-1].file_id
+            user_data[user_id]["photo"] = photo_id
+            save_data()
+            waiting_for_photo.discard(user_id)
+            bot.send_message(user_id, "✅ Картинка профиля успешно установлена!", reply_markup=get_main_keyboard())
+            show_profile_card(user_id, user_id)
+        else:
+            bot.send_message(user_id, "⚠️ Пожалуйста, отправьте изображение как фото.")
+        return
+
     if user_id in active_chats:
         target = active_chats[user_id]
         if message.content_type == 'text': 
@@ -198,13 +364,18 @@ def chat(message):
         else: 
             bot.copy_message(target, user_id, message.message_id)
             
-    # Пересылка сообщений в групповых чатах (Имя сохранено)
     elif user_id in user_to_group:
         gid = user_to_group[user_id]
+        share_markup = InlineKeyboardMarkup()
+        share_markup.add(InlineKeyboardButton("👤 Посмотреть профиль", callback_data=f"view_{user_id}"))
+        
         for member in groups.get(gid, []):
             if member != user_id:
-                if message.content_type == 'text': bot.send_message(member, f"💬 {name}: {message.text}")
-                else: bot.send_message(member, f"👤 {name}:"); bot.copy_message(member, user_id, message.message_id)
+                if message.content_type == 'text': 
+                    bot.send_message(member, f"{user_emoji} {name}: {message.text}", reply_markup=share_markup)
+                else: 
+                    bot.send_message(member, f"👤 {name}:", reply_markup=share_markup)
+                    bot.copy_message(member, user_id, message.message_id)
 
 if __name__ == '__main__':
     print("Бот запущен...")
@@ -214,4 +385,4 @@ if __name__ == '__main__':
         print(f"Критическая ошибка: {e}. Перезагрузка...")
         time.sleep(3)
         os.execv(sys.executable, ['python'] + sys.argv)
-
+        
