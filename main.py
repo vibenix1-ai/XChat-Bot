@@ -83,21 +83,6 @@ def ask_name_callback(call):
         reply_markup=get_cancel_keyboard()
     )
 
-# Добавлена команда /name
-@bot.message_handler(commands=['name'])
-def ask_name_command(message):
-    user_id = message.chat.id
-    
-    if user_id in active_chats or user_id in user_to_group or user_id in waiting_users:
-        return bot.send_message(user_id, "⚠️ Нельзя менять имя во время поиска или чата.")
-
-    waiting_for_name.add(user_id)
-    bot.send_message(
-        user_id, 
-        "✍️ Напиши имя, которое будет отображаться в чатах:", 
-        reply_markup=get_cancel_keyboard()
-    )
-
 # Добавлена команда /myname для просмотра текущего имени
 @bot.message_handler(commands=['myname'])
 def show_my_name(message):
@@ -105,9 +90,9 @@ def show_my_name(message):
     name = get_display_name(user_id)
     
     if name == "Аноним":
-        bot.send_message(user_id, "Стандартное имя Аноним, пожалуй вам стоит поменять имя")
+        bot.send_message(user_id, "ℹ️ Стандартное имя Аноним, пожалуй вам стоит поменять имя")
     else:
-        bot.send_message(user_id, f"Вы {name}")
+        bot.send_message(user_id, f"ℹ️ Вы {name}")
 
 # Добавлена команда /chat
 @bot.message_handler(commands=['chat'], func=lambda message: True)
