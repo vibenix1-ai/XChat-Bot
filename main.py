@@ -98,6 +98,17 @@ def ask_name_command(message):
         reply_markup=get_cancel_keyboard()
     )
 
+# Добавлена команда /myname для просмотра текущего имени
+@bot.message_handler(commands=['myname'])
+def show_my_name(message):
+    user_id = message.chat.id
+    name = get_display_name(user_id)
+    
+    if name == "Аноним":
+        bot.send_message(user_id, "Стандартное имя Аноним, пожалуй вам стоит поменять имя")
+    else:
+        bot.send_message(user_id, f"Вы {name}")
+
 # Добавлена команда /chat
 @bot.message_handler(commands=['chat'], func=lambda message: True)
 @bot.message_handler(func=lambda message: message.text == '🔍 Начать поиск')
