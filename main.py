@@ -5,29 +5,9 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import os
 import sys
 import time
-import threading  # Для запуска сервера в фоновом потоке
-from http.server import BaseHTTPRequestHandler, HTTPServer # Встроенный веб-сервер
 
 API_TOKEN = os.environ.get('API_TOKEN')
 bot = telebot.TeleBot(API_TOKEN)
-PORT = int(os.environ.get('PORT', 8080))
-# --- ФЕЙКОВЫЙ ВЕБ-СЕРВЕР ДЛЯ RENDER ---
-class PingHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/html; charset=utf-8')
-        self.end_headers()
-        self.wfile.write("Бот работает!".encode('utf-8'))
-
-    # Отключаем логи запросов в консоли, чтобы не спамить
-    def log_message(self, format, *args):
-        return
-
-def run_web_server():
-    server = HTTPServer(('0.0.0.0', PORT), PingHandler)
-    print(f"Веб-сервер запущен на порту {PORT}")
-    server.serve_forever()
-# --------------------------------------
 
 # Данные
 waiting_users = []
